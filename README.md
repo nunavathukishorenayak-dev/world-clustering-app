@@ -1,2 +1,16 @@
-# world-clustering-app
-Developed a clustering model to segment countries based on development indicators using PCA for dimensionality reduction and KMeans, DBSCAN, and Hierarchical clustering algorithms. Evaluated model performance using multiple metrics and deployed the solution as an interactive Streamlit application for real-time visualization and analysis.
+# World Development Clustering Studio
+
+## Run locally
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+## Deploy on Streamlit Community Cloud
+1. Push this folder to a GitHub repository.
+2. Open Streamlit Community Cloud.
+3. Click **Create app**.
+4. Select the repository and choose `app.py` as the entrypoint.
+5. Ensure `requirements.txt` is in the repo so dependencies install correctly.
+
+This matches Streamlit's official deployment guidance for Community Cloud and dependency management. citeturn834710search0turn834710search1
