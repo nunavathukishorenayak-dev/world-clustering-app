@@ -1,4 +1,3 @@
-
 import io
 from pathlib import Path
 
@@ -90,7 +89,6 @@ def score_clustering(X: np.ndarray, labels: np.ndarray) -> dict:
     valid_cluster_labels = [x for x in unique_labels if x != -1]
     n_clusters = len(valid_cluster_labels)
 
-    # Silhouette/DB/CH require at least 2 actual clusters
     if n_clusters < 2:
         return {
             "silhouette": np.nan,
@@ -207,6 +205,13 @@ with st.expander("Preview raw data", expanded=False):
     st.dataframe(raw_df.head(20), use_container_width=True)
 
 cleaned_df, numeric_cols, id_cols = clean_dataset(raw_df, null_threshold)
+
+# Aggregate repeated country rows into one row per country
+if "Country" in cleaned_df.columns:
+    cleaned_df = cleaned_df.groupby("Country").mean(numeric_only=True).reset_index()
+
+# Recompute numeric columns after grouping
+numeric_cols = cleaned_df.select_dtypes(include=np.number).columns.tolist()
 
 if not numeric_cols:
     st.error("No numeric columns found after cleaning. Please review the uploaded file.")
@@ -326,6 +331,7 @@ with st.expander("Why this app looks professional", expanded=False):
     st.markdown(
         """
         - It cleans raw economic data automatically.
+        - It aggregates repeated country rows into one country-level record.
         - It chooses PCA components using explained variance.
         - It compares three clustering models on the same PCA feature space.
         - It reports Silhouette, Davies-Bouldin, and Calinski-Harabasz metrics.
