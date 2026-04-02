@@ -50,14 +50,14 @@ def clean_dataset(df: pd.DataFrame, null_threshold: float) -> tuple[pd.DataFrame
     for col in cleaned.columns:
         if col == country_col:
             continue
-        cleaned[col] = pd.to_numeric(cleaned[col], errors="ignore")
+        cleaned[col] = pd.to_numeric(cleaned[col], errors="coerce")
 
     # Drop high-null columns
     null_ratio = cleaned.isna().mean()
     dropped_cols = null_ratio[null_ratio > null_threshold].index.tolist()
     if country_col in dropped_cols:
         dropped_cols.remove(country_col)
-    cleaned = cleaned.drop(columns=dropped_cols, errors="ignore")
+    cleaned = cleaned.drop(columns=dropped_cols, errors="coerce")
 
     # Remove duplicates
     cleaned = cleaned.drop_duplicates().reset_index(drop=True)
