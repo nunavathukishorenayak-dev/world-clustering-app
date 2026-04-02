@@ -13,4 +13,4 @@ streamlit run app.py
 4. Select the repository and choose `app.py` as the entrypoint.
 5. Ensure `requirements.txt` is in the repo so dependencies install correctly.
 
-This matches Streamlit's official deployment guidance for Community Cloud and dependency management. citeturn834710search0turn834710search1
+
