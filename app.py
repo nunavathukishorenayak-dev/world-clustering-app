@@ -1,4 +1,3 @@
-import io
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -13,7 +12,7 @@ from sklearn.preprocessing import StandardScaler
 
 
 st.set_page_config(
-    page_title="World Development Clustering Studio",
+    page_title="Country Development Clustering App",
     page_icon="🌍",
     layout="wide",
 )
@@ -29,10 +28,8 @@ def load_sample_data() -> pd.DataFrame:
 def clean_dataset(df: pd.DataFrame, null_threshold: float) -> tuple[pd.DataFrame, list[str], list[str]]:
     cleaned = df.copy()
 
-    # Standardize column names
     cleaned.columns = [str(c).strip() for c in cleaned.columns]
 
-    # Remove common numeric symbols from object columns only
     object_cols = cleaned.select_dtypes(include="object").columns.tolist()
     for col in object_cols:
         cleaned[col] = (
@@ -46,34 +43,29 @@ def clean_dataset(df: pd.DataFrame, null_threshold: float) -> tuple[pd.DataFrame
 
     country_col = "Country" if "Country" in cleaned.columns else None
 
-    # Convert all non-country columns to numeric when possible
     for col in cleaned.columns:
         if col == country_col:
             continue
         cleaned[col] = pd.to_numeric(cleaned[col], errors="coerce")
 
-    # Drop high-null columns
     null_ratio = cleaned.isna().mean()
     dropped_cols = null_ratio[null_ratio > null_threshold].index.tolist()
     if country_col in dropped_cols:
         dropped_cols.remove(country_col)
-    cleaned = cleaned.drop(columns=dropped_cols, errors="coerce")
 
-    # Remove duplicates
+    cleaned = cleaned.drop(columns=dropped_cols, errors="ignore")
     cleaned = cleaned.drop_duplicates().reset_index(drop=True)
 
-    # Numeric preparation
     numeric_cols = cleaned.select_dtypes(include=np.number).columns.tolist()
     cleaned[numeric_cols] = cleaned[numeric_cols].replace([np.inf, -np.inf], np.nan)
     cleaned[numeric_cols] = cleaned[numeric_cols].fillna(cleaned[numeric_cols].median(numeric_only=True))
 
-    # Keep a useful text id column if present
     id_cols = [country_col] if country_col else []
 
     return cleaned, numeric_cols, id_cols
 
 
-def choose_pca_components(scaled_data: np.ndarray, variance_target: float) -> tuple[np.ndarray, PCA, np.ndarray, int]:
+def choose_pca_components(scaled_data: np.ndarray, variance_target: float):
     pca_full = PCA()
     pca_full.fit(scaled_data)
     cumulative_variance = np.cumsum(pca_full.explained_variance_ratio_)
@@ -121,9 +113,10 @@ def plot_variance_curve(cumulative_variance: np.ndarray, chosen_n: int, target: 
     st.pyplot(fig)
 
 
-def plot_clusters_2d(X_2d: np.ndarray, labels: np.ndarray, title: str):
-    fig, ax = plt.subplots(figsize=(8, 5))
+def plot_clusters_2d(X_2d: np.ndarray, labels: np.ndarray, title: str, selected_country_point=None):
+    fig, ax = plt.subplots(figsize=(9, 5))
     unique_labels = np.unique(labels)
+
     for label in unique_labels:
         mask = labels == label
         if label == -1:
@@ -138,10 +131,21 @@ def plot_clusters_2d(X_2d: np.ndarray, labels: np.ndarray, title: str):
             ax.scatter(
                 X_2d[mask, 0],
                 X_2d[mask, 1],
-                s=60,
+                s=55,
                 edgecolors="black",
                 label=f"Cluster {label}",
             )
+
+    if selected_country_point is not None:
+        ax.scatter(
+            selected_country_point[0],
+            selected_country_point[1],
+            s=220,
+            marker="*",
+            edgecolors="black",
+            label="Selected Country",
+        )
+
     ax.set_title(title)
     ax.set_xlabel("PC1")
     ax.set_ylabel("PC2")
@@ -175,10 +179,88 @@ def cluster_profiles(df_final: pd.DataFrame, label_col: str) -> pd.DataFrame:
     return profile
 
 
-st.title("🌍 World Development Clustering Studio")
-st.caption(
-    "A polished clustering app for country segmentation using PCA, KMeans, DBSCAN, and Hierarchical clustering."
-)
+def get_matching_columns(columns, keywords):
+    matched = []
+    lower_map = {c.lower(): c for c in columns}
+    for col in columns:
+        cl = col.lower()
+        if any(k in cl for k in keywords):
+            matched.append(col)
+    return list(dict.fromkeys(matched))
+
+
+def create_development_score(df_numeric: pd.DataFrame) -> pd.Series:
+    cols = df_numeric.columns.tolist()
+
+    positive_keywords = [
+        "gdp", "income", "life", "health", "tourism", "internet", "literacy",
+        "education", "urban", "employment", "exports"
+    ]
+    negative_keywords = [
+        "mortality", "death", "fertility", "poverty", "birth rate", "co2", "inflation", "unemployment"
+    ]
+
+    positive_cols = get_matching_columns(cols, positive_keywords)
+    negative_cols = get_matching_columns(cols, negative_keywords)
+
+    z = (df_numeric - df_numeric.mean()) / df_numeric.std(ddof=0)
+    z = z.replace([np.inf, -np.inf], np.nan).fillna(0)
+
+    score = pd.Series(0, index=df_numeric.index, dtype=float)
+
+    if positive_cols:
+        score += z[positive_cols].mean(axis=1)
+    if negative_cols:
+        score -= z[negative_cols].mean(axis=1)
+
+    return score
+
+
+def label_clusters_by_development(df_final: pd.DataFrame, cluster_col: str = "Cluster"):
+    numeric_df = df_final.select_dtypes(include=np.number).drop(columns=[cluster_col], errors="ignore")
+    df_temp = df_final.copy()
+    df_temp["Development_Score"] = create_development_score(numeric_df)
+
+    cluster_rank = (
+        df_temp.groupby(cluster_col)["Development_Score"]
+        .mean()
+        .sort_values()
+        .index
+        .tolist()
+    )
+
+    label_names = ["Underdeveloped", "Developing", "Developed"]
+
+    if len(cluster_rank) == 2:
+        label_names = ["Developing", "Developed"]
+    elif len(cluster_rank) > 3:
+        label_names = [f"Level {i+1}" for i in range(len(cluster_rank))]
+
+    mapping = {cluster: label_names[i] for i, cluster in enumerate(cluster_rank)}
+    df_final["Cluster_Name"] = df_final[cluster_col].map(mapping)
+
+    return df_final, mapping
+
+
+def get_country_dashboard_columns(df: pd.DataFrame):
+    preferred = []
+    for key in [
+        "GDP", "Life Expectancy", "Health Exp/Capita", "CO2 Emissions",
+        "Income", "Population", "Tourism Inbound", "Tourism Outbound"
+    ]:
+        for col in df.columns:
+            if col.lower() == key.lower():
+                preferred.append(col)
+
+    if not preferred:
+        numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+        preferred = numeric_cols[:6]
+
+    return preferred[:6]
+
+
+st.title("🌍 Country Development Clustering App")
+st.caption("Interactive clustering and country development dashboard")
 
 with st.sidebar:
     st.header("Controls")
@@ -206,11 +288,9 @@ with st.expander("Preview raw data", expanded=False):
 
 cleaned_df, numeric_cols, id_cols = clean_dataset(raw_df, null_threshold)
 
-# Aggregate repeated country rows into one row per country
 if "Country" in cleaned_df.columns:
     cleaned_df = cleaned_df.groupby("Country").mean(numeric_only=True).reset_index()
 
-# Recompute numeric columns after grouping
 numeric_cols = cleaned_df.select_dtypes(include=np.number).columns.tolist()
 
 if not numeric_cols:
@@ -274,6 +354,7 @@ valid_results = results.dropna(subset=["silhouette"]).sort_values(
     by=["silhouette", "db_index", "ch_score"],
     ascending=[False, True, False],
 )
+
 best_model = valid_results.iloc[0]["Model"] if not valid_results.empty else None
 
 if best_model:
@@ -294,12 +375,36 @@ selected_model = st.selectbox(
 selected_labels = model_to_labels[selected_model]
 final_df = cleaned_df.copy()
 final_df["Cluster"] = selected_labels
+final_df, cluster_name_mapping = label_clusters_by_development(final_df, "Cluster")
+
+# Country selector
+selected_country = None
+selected_country_row = None
+selected_country_point = None
+
+if "Country" in final_df.columns:
+    st.subheader("Select Country")
+    selected_country = st.selectbox("Choose a country", sorted(final_df["Country"].dropna().astype(str).unique()))
+    selected_country_row = final_df[final_df["Country"].astype(str) == selected_country].iloc[0]
+
+    country_index = final_df[final_df["Country"].astype(str) == selected_country].index[0]
+    selected_country_point = pca_plot[country_index]
+
+    st.success(
+        f"{selected_country} is classified as: {selected_country_row['Cluster_Name']} "
+        f"(Cluster {selected_country_row['Cluster']})"
+    )
 
 col_left, col_right = st.columns([2, 1])
 
 with col_left:
     st.subheader(f"{selected_model} cluster map")
-    plot_clusters_2d(pca_plot, selected_labels, f"{selected_model} clusters on 2D PCA view")
+    plot_clusters_2d(
+        pca_plot,
+        selected_labels,
+        f"{selected_model} clusters on 2D PCA view",
+        selected_country_point=selected_country_point,
+    )
 
 with col_right:
     st.subheader("Cluster distribution")
@@ -308,12 +413,73 @@ with col_right:
 
 st.subheader("Cluster profiles")
 profiles = cluster_profiles(final_df, "Cluster")
+profiles["Cluster Name"] = profiles.index.map(cluster_name_mapping)
 st.dataframe(profiles, use_container_width=True)
 
-if "Country" in final_df.columns:
-    st.subheader("Country lookup")
-    country = st.selectbox("Choose a country", sorted(final_df["Country"].dropna().astype(str).unique()))
-    st.dataframe(final_df[final_df["Country"].astype(str) == country], use_container_width=True)
+# Country dashboard
+if selected_country_row is not None:
+    st.subheader(f"{selected_country} Dashboard")
+
+    cluster_num = int(selected_country_row["Cluster"])
+    cluster_name = selected_country_row["Cluster_Name"]
+    cluster_avg = final_df[final_df["Cluster"] == cluster_num].mean(numeric_only=True)
+    overall_avg = final_df.mean(numeric_only=True)
+
+    metric_cols = get_country_dashboard_columns(final_df)
+    top1, top2, top3 = st.columns(3)
+
+    if len(metric_cols) >= 1:
+        top1.metric(metric_cols[0], f"{selected_country_row[metric_cols[0]]:.2f}")
+    if len(metric_cols) >= 2:
+        top2.metric(metric_cols[1], f"{selected_country_row[metric_cols[1]]:.2f}")
+    if len(metric_cols) >= 3:
+        top3.metric(metric_cols[2], f"{selected_country_row[metric_cols[2]]:.2f}")
+
+    top4, top5, top6 = st.columns(3)
+    if len(metric_cols) >= 4:
+        top4.metric(metric_cols[3], f"{selected_country_row[metric_cols[3]]:.2f}")
+    if len(metric_cols) >= 5:
+        top5.metric(metric_cols[4], f"{selected_country_row[metric_cols[4]]:.2f}")
+    if len(metric_cols) >= 6:
+        top6.metric(metric_cols[5], f"{selected_country_row[metric_cols[5]]:.2f}")
+
+    st.markdown(
+        f"""
+        **Development Category:** {cluster_name}  
+        **Cluster Number:** {cluster_num}
+        """
+    )
+
+    compare_cols = metric_cols[:5]
+    compare_df = pd.DataFrame({
+        "Indicator": compare_cols,
+        selected_country: [selected_country_row[col] for col in compare_cols],
+        "Cluster Average": [cluster_avg[col] for col in compare_cols],
+        "Overall Average": [overall_avg[col] for col in compare_cols],
+    })
+
+    st.subheader("Country vs Cluster Average")
+    st.dataframe(compare_df.round(2), use_container_width=True)
+
+    fig, ax = plt.subplots(figsize=(9, 4))
+    x = np.arange(len(compare_cols))
+    width = 0.25
+
+    ax.bar(x - width, compare_df[selected_country], width, label=selected_country)
+    ax.bar(x, compare_df["Cluster Average"], width, label="Cluster Avg")
+    ax.bar(x + width, compare_df["Overall Average"], width, label="Overall Avg")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(compare_cols, rotation=25, ha="right")
+    ax.set_title(f"{selected_country} vs Cluster vs Overall")
+    ax.legend()
+    ax.grid(axis="y", alpha=0.3)
+    st.pyplot(fig)
+
+    detail_cols = ["Country", "Cluster", "Cluster_Name"] + metric_cols
+    detail_cols = [c for c in detail_cols if c in final_df.columns]
+    st.subheader(f"{selected_country} Details")
+    st.dataframe(pd.DataFrame([selected_country_row[detail_cols]]), use_container_width=True)
 
 st.subheader("Hierarchical dendrogram")
 plot_dendrogram(pca_data)
@@ -323,18 +489,19 @@ csv_bytes = download_df.to_csv(index=False).encode("utf-8")
 st.download_button(
     label="Download clustered data as CSV",
     data=csv_bytes,
-    file_name="world_development_clustered.csv",
+    file_name="country_development_clustered.csv",
     mime="text/csv",
 )
 
-with st.expander("Why this app looks professional", expanded=False):
+with st.expander("Why this app looks strong", expanded=False):
     st.markdown(
         """
-        - It cleans raw economic data automatically.
-        - It aggregates repeated country rows into one country-level record.
+        - It cleans raw data automatically.
+        - It aggregates repeated country rows into one record per country.
         - It chooses PCA components using explained variance.
-        - It compares three clustering models on the same PCA feature space.
-        - It reports Silhouette, Davies-Bouldin, and Calinski-Harabasz metrics.
-        - It includes a dendrogram, cluster profiles, and downloadable clustered output.
+        - It compares KMeans, DBSCAN, and Hierarchical clustering.
+        - It labels clusters into development categories.
+        - It gives a dashboard for the selected country.
+        - It includes cluster profiles, visualization, and CSV download.
         """
     )
