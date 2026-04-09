@@ -3,6 +3,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 from scipy.cluster.hierarchy import dendrogram, fcluster, linkage
 from sklearn.cluster import DBSCAN, KMeans
@@ -181,7 +182,6 @@ def cluster_profiles(df_final: pd.DataFrame, label_col: str) -> pd.DataFrame:
 
 def get_matching_columns(columns, keywords):
     matched = []
-    lower_map = {c.lower(): c for c in columns}
     for col in columns:
         cl = col.lower()
         if any(k in cl for k in keywords):
@@ -193,11 +193,12 @@ def create_development_score(df_numeric: pd.DataFrame) -> pd.Series:
     cols = df_numeric.columns.tolist()
 
     positive_keywords = [
-        "gdp", "income", "life", "health", "tourism", "internet", "literacy",
-        "education", "urban", "employment", "exports"
+        "gdp", "income", "life", "health", "tourism", "internet",
+        "literacy", "education", "urban", "employment", "exports"
     ]
     negative_keywords = [
-        "mortality", "death", "fertility", "poverty", "birth rate", "co2", "inflation", "unemployment"
+        "mortality", "death", "fertility", "poverty", "birth", "co2",
+        "inflation", "unemployment"
     ]
 
     positive_cols = get_matching_columns(cols, positive_keywords)
@@ -244,10 +245,12 @@ def label_clusters_by_development(df_final: pd.DataFrame, cluster_col: str = "Cl
 
 def get_country_dashboard_columns(df: pd.DataFrame):
     preferred = []
-    for key in [
+    target_names = [
         "GDP", "Life Expectancy", "Health Exp/Capita", "CO2 Emissions",
         "Income", "Population", "Tourism Inbound", "Tourism Outbound"
-    ]:
+    ]
+
+    for key in target_names:
         for col in df.columns:
             if col.lower() == key.lower():
                 preferred.append(col)
@@ -257,6 +260,57 @@ def get_country_dashboard_columns(df: pd.DataFrame):
         preferred = numeric_cols[:6]
 
     return preferred[:6]
+
+
+def plot_world_map(df: pd.DataFrame):
+    if "Country" not in df.columns or "Cluster_Name" not in df.columns:
+        st.warning("Country or Cluster_Name column not found for world map.")
+        return
+
+    map_df = df.copy()
+
+    map_df["Country"] = map_df["Country"].replace({
+        "United States of America": "United States",
+        "Virgin Islands (U.S.)": "United States Virgin Islands",
+        "Congo, Dem. Rep.": "Democratic Republic of the Congo",
+        "Congo, Rep.": "Republic of the Congo",
+        "Kyrgyz Republic": "Kyrgyzstan",
+        "Slovak Republic": "Slovakia",
+        "Russian Federation": "Russia",
+        "Egypt, Arab Rep.": "Egypt",
+        "Iran, Islamic Rep.": "Iran",
+        "Yemen, Rep.": "Yemen",
+        "Venezuela, RB": "Venezuela",
+        "Gambia, The": "Gambia",
+        "Bahamas, The": "Bahamas",
+        "Brunei Darussalam": "Brunei",
+        "Hong Kong SAR, China": "Hong Kong",
+        "Macao SAR, China": "Macao",
+        "Korea, Rep.": "South Korea",
+        "Korea, Dem. People's Rep.": "North Korea",
+        "Lao PDR": "Laos",
+    })
+
+    fig = px.choropleth(
+        map_df,
+        locations="Country",
+        locationmode="country names",
+        color="Cluster_Name",
+        hover_name="Country",
+        title="World Development Cluster Map",
+        color_discrete_map={
+            "Underdeveloped": "red",
+            "Developing": "orange",
+            "Developed": "green"
+        }
+    )
+
+    fig.update_layout(
+        geo=dict(showframe=False, showcoastlines=True, projection_type="equirectangular"),
+        height=550
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 
 st.title("🌍 Country Development Clustering App")
@@ -314,7 +368,6 @@ c4.metric("Variance retained", f"{cumulative_variance[chosen_n - 1] * 100:.2f}%"
 
 plot_variance_curve(cumulative_variance, chosen_n, variance_target)
 
-# Models
 kmeans = KMeans(n_clusters=k_clusters, random_state=42, n_init=10)
 kmeans_labels = kmeans.fit_predict(pca_data)
 
@@ -377,7 +430,6 @@ final_df = cleaned_df.copy()
 final_df["Cluster"] = selected_labels
 final_df, cluster_name_mapping = label_clusters_by_development(final_df, "Cluster")
 
-# Country selector
 selected_country = None
 selected_country_row = None
 selected_country_point = None
@@ -416,7 +468,9 @@ profiles = cluster_profiles(final_df, "Cluster")
 profiles["Cluster Name"] = profiles.index.map(cluster_name_mapping)
 st.dataframe(profiles, use_container_width=True)
 
-# Country dashboard
+st.subheader("World Map by Development Category")
+plot_world_map(final_df)
+
 if selected_country_row is not None:
     st.subheader(f"{selected_country} Dashboard")
 
@@ -502,6 +556,6 @@ with st.expander("Why this app looks strong", expanded=False):
         - It compares KMeans, DBSCAN, and Hierarchical clustering.
         - It labels clusters into development categories.
         - It gives a dashboard for the selected country.
-        - It includes cluster profiles, visualization, and CSV download.
+        - It includes a world map, cluster profiles, visualization, and CSV download.
         """
     )
